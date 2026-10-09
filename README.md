@@ -28,3 +28,11 @@ Optional:
 
 ## Запуск
 Railway використовує `Procfile` (`python main.py`). Перевірте, що deployment активний і в логах немає помилок.
+
+
+## Source coverage status
+- Alerts.in.ua API is implemented and filtered to oblast UID 13.
+- Public Telegram preview polling is best-effort for the configured handles.
+- `Dron Alert` is **not connected** in this build: the exact official product/channel/API endpoint could not be verified from the supplied information. Do not treat it as a live source yet.
+- The name `Західний` is ambiguous; add its verified public handle to `TELEGRAM_CHANNELS` in Railway once confirmed. The `OFFICIAL_FEEDS` variable is reserved and RSS fetching is not implemented.
+- This package has syntax checks only; it has not been deployed or tested against your Railway secrets/Telegram group.

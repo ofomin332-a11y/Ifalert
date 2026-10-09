@@ -96,36 +96,72 @@ async def send(bot, text):
 
 # Parse public Telegram web previews only. This is not the Telegram Bot API and may
 # fail if Telegram changes page markup or restricts access; errors are logged.
-POST_RE = re.compile(r'<div class="tgme_widget_message_wrap[^"]*"[^>]*>.*?</div>\s*</div>\s*</div>', re.S)
 def extract_posts(page, handle):
+    # Parse Telegram's public preview HTML robustly.
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(page, 'html.parser')
     posts = []
-    for block in POST_RE.findall(page):
-        m = re.search(r'data-post="([^"]+)"', block)
-        if not m: continue
-        post_id = m.group(1)
-        tm = re.search(r'<time[^>]*datetime="([^"]+)"', block)
-        when = tm.group(1) if tm else 'час не вказано'
-        body_m = re.search(r'<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>', block, re.S)
-        if not body_m: continue
-        body = body_m.group(1)
-        body = re.sub(r'<br\s*/?>', '\n', body)
-        body = re.sub(r'<[^>]+>', '', body)
+    for node in soup.select('.tgme_widget_message_wrap'):
+        msg = node.select_one('.tgme_widget_message')
+        if not msg:
+            continue
+        post_id = msg.get('data-post')
+        if not post_id:
+            link = node.select_one('a.tgme_widget_message_date')
+            href = link.get('href', '') if link else ''
+            m = re.search(r't\.me/([^/]+/\\d+)', href)
+            if m:
+                post_id = m.group(1)
+        if not post_id:
+            continue
+        tm = node.select_one('time')
+        when = tm.get('datetime', 'час не вказано') if tm else 'час не вказано'
+        body_node = node.select_one('.tgme_widget_message_text')
+        if not body_node:
+            continue
+        for br in body_node.select('br'):
+            br.replace_with('\\n')
+        body = body_node.get_text('', strip=True)
         body = html.unescape(body).strip()
-        body = re.sub(r'\n{3,}', '\n\n', body)
         if body:
             posts.append((post_id, when, body, f'https://t.me/{post_id}'))
-    return posts[-20:]
+    # Telegram page displays newest first; preserve only unique recent posts.
+    unique = {}
+    for post in posts:
+        unique[post[0]] = post
+    return list(unique.values())[-20:]
 
 def should_forward(handle, body):
-    # Keep safety alerts, public local-authority updates, and potentially relevant regional
-    # news. This is a keyword filter, not a fact-checker.
+    # Locality filter for third-party aggregators. Official Ivano-Frankivsk
+    # sources are trusted as geographically local, but still filter posts that
+    # explicitly focus on a different oblast.
     t = body.casefold()
-    keywords = ('івано-франків', 'прикарпат', 'тривог', 'повітрян', 'ракета', 'шахед',
-                'дрон', 'бпла', 'вибух', 'обстріл', 'відбій', 'укрит', 'марцінків',
-                'міська рада', 'обласна рада', 'ова', 'енерг', 'відключ')
-    if handle in ('martsinkiv_online', 'mrada_if_ua', 'onyshchuksvitlana'):
+    local_terms = (
+        'івано-франків', 'івано франків', 'прикарпат', 'франківськ',
+        'калуш', 'коломия', 'надвірна', 'долина', 'косів', 'верховина',
+        'бурштин', 'галич', 'тлумач', 'рогатин', 'богородчан', 'яремче',
+        'івано-франківська область', 'івано-франківський район'
+    )
+    other_region = (
+        'київщина', 'львівщина', 'волинь', 'закарпаття', 'тернопільщина',
+        'чернівеччина', 'рівненщина', 'харківщина', 'одещина', 'сумщина',
+        'дніпропетровщина', 'полтавщина', 'чернігівщина', 'херсонщина',
+        'запоріжжя', 'донеччина', 'луганщина', 'хмельниччина', 'вінниччина'
+    )
+    official_local = {'martsinkiv_online', 'mrada_if_ua', 'onyshchuksvitlana'}
+    # Do not forward an obviously other-region-only post from any source.
+    if any(term in t for term in other_region) and not any(term in t for term in local_terms):
+        return False
+    if handle in official_local:
         return True
-    return any(k in t for k in keywords)
+    keywords = (
+        'тривог', 'повітрян', 'ракета', 'шахед', 'дрон', 'бпла',
+        'вибух', 'обстріл', 'відбій', 'укрит', 'марцінків',
+        'міська рада', 'обласна рада', 'ова', 'енерг', 'відключ',
+        'ппо', 'загроз'
+    )
+    return any(term in t for term in local_terms) and any(k in t for k in keywords)
+
 
 async def poll_channels(session, bot, seen):
     for handle in CHANNELS:
