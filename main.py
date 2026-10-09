@@ -234,10 +234,9 @@ async def poll_channels(session, bot, seen):
             for post_id, when, body, link in new_posts:
                 known.add(post_id)
                 if should_forward(handle, body):
-                    message = (f'📣 <b>НОВА ПУБЛІКАЦІЯ</b>\\n'
-                               f'📡 Джерело: <b>@{html.escape(handle)}</b>\\n'
-                               f'🕒 Час публікації: {html.escape(when)}\\n\\n'
-                               f'{html.escape(body[:2600])}\\n\\n🔗 <a href="{link}">Відкрити оригінал</a>')
+                    message = (f'📣 <b>НОВА ПУБЛІКАЦІЯ</b>\n'
+                               f'📡 Джерело: <b>@{html.escape(handle)}</b>\n\n'
+                               f'{html.escape(body[:2600])}')
                     try:
                         await send(bot, message)
                         forwarded += 1
