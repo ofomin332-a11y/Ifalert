@@ -27,6 +27,7 @@ DEFAULT_CHANNELS = [
     'ifalarm',            # ТРИВОГА ІФ (локальний канал тривог)
     'air_alert_ua',       # офіційний загальноукраїнський канал тривог
     'truexafrankivsk',    # TrueX Івано-Франківськ
+    'blacklist2477',      # Blacklist 24/7 (публічний Telegram-канал)
 ]
 CHANNELS = list(dict.fromkeys(
     x.strip().lstrip('@').strip('/')
