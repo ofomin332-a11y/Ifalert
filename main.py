@@ -10,7 +10,7 @@ log = logging.getLogger('if-alert-monitor')
 
 BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
-API_TOKEN = os.environ['ALERTS_API_TOKEN']
+API_TOKEN = os.getenv('ALERTS_API_TOKEN', '').strip()
 POLL_SECONDS = max(10, int(os.getenv('POLL_SECONDS', '10')))
 CHANNEL_POLL_SECONDS = max(30, int(os.getenv('CHANNEL_POLL_SECONDS', '60')))
 API_URL = 'https://api.alerts.in.ua/v1/alerts/active.json'
@@ -22,7 +22,10 @@ DEFAULT_CHANNELS = [
     'martsinkiv_online',  # Руслан Марцінків
     'mrada_if_ua',        # Івано-Франківська міська рада
     'onyshchuksvitlana',  # Голова Івано-Франківської ОВА
+    'zahidnimonitoring',  # Західний Моніторинг (неофіційне джерело)
     'totallzrada',        # Тотальна Зрада (неофіційний агрегатор)
+    'ifalarm',            # ТРИВОГА ІФ (локальний канал тривог)
+    'air_alert_ua',       # офіційний загальноукраїнський канал тривог
 ]
 CHANNELS = list(dict.fromkeys(
     x.strip().lstrip('@').strip('/')
@@ -109,7 +112,7 @@ def extract_posts(page, handle):
         if not post_id:
             link = node.select_one('a.tgme_widget_message_date')
             href = link.get('href', '') if link else ''
-            m = re.search(r't\.me/([^/]+/\\d+)', href)
+            m = re.search(r't\.me/([^/]+/\d+)', href)
             if m:
                 post_id = m.group(1)
         if not post_id:
@@ -120,7 +123,7 @@ def extract_posts(page, handle):
         if not body_node:
             continue
         for br in body_node.select('br'):
-            br.replace_with('\\n')
+            br.replace_with('\n')
         body = body_node.get_text('', strip=True)
         body = html.unescape(body).strip()
         if body:
@@ -198,6 +201,8 @@ async def poll_channels(session, bot, seen):
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
+    if not API_TOKEN:
+        log.warning('ALERTS_API_TOKEN is not set: Alerts.in.ua API disabled; using public Telegram sources only. Coverage is not guaranteed.')
     previous = None
     fingerprints = {}
     etag = None
@@ -206,7 +211,10 @@ async def main():
     async with aiohttp.ClientSession(headers={'User-Agent':'Mozilla/5.0 IF-Alert-Monitor/3.0'}) as session:
         while True:
             try:
-                alerts, etag = await fetch_alerts(session, etag)
+                if API_TOKEN:
+                    alerts, etag = await fetch_alerts(session, etag)
+                else:
+                    alerts = None
                 if alerts is not None:
                     current = {key(a): a for a in alerts}
                     fp = {k: repr((a.get('alert_type'), a.get('alert_level'), a.get('threats'), a.get('notes')))

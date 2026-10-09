@@ -1,15 +1,15 @@
-# Тривога ІФ | Моніторинг — Railway v3
+# Тривога ІФ | Моніторинг — Railway без API-токена
 
 ## Що підключено
 - `alerts.in.ua` API для активних повітряних тривог і змін статусу по Івано-Франківській області (UID 13).
-- Публічні Telegram-перегляди: `@martsinkiv_online`, `@mrada_if_ua`, `@onyshchuksvitlana`, `@totallzrada`.
+- Публічні Telegram-перегляди: `@martsinkiv_online`, `@mrada_if_ua`, `@onyshchuksvitlana`, `@totallzrada`, `@ifalarm`, `@air_alert_ua`.
 - Пересилання нових дописів із посиланням на оригінал, автором-джерелом і часом публікації, якщо публічна сторінка Telegram доступна.
 
 ## Railway Variables
 Required:
 - `TELEGRAM_BOT_TOKEN` — токен Telegram-бота (зберігати лише в Railway Variables).
 - `TELEGRAM_CHAT_ID` — ID групи, наприклад `-1003696297758`.
-- `ALERTS_API_TOKEN` — токен API alerts.in.ua.
+- `ALERTS_API_TOKEN` — необов’язковий. Якщо не заданий, API Alerts.in.ua вимикається, а бот продовжує перевіряти публічні Telegram-джерела.
 
 Optional:
 - `POLL_SECONDS=10` — частота перевірки API тривог (мінімум 10 сек).
@@ -31,8 +31,11 @@ Railway використовує `Procfile` (`python main.py`). Перевірт
 
 
 ## Source coverage status
-- Alerts.in.ua API is implemented and filtered to oblast UID 13.
-- Public Telegram preview polling is best-effort for the configured handles.
+- Alerts.in.ua API is optional and filtered to oblast UID 13 when `ALERTS_API_TOKEN` is configured. Without it, no direct API alert-state feed is available.
+- Public Telegram preview polling is best-effort for the configured handles, including `@ifalarm` and `@air_alert_ua`; the bot only forwards posts that pass its Ivano-Frankivsk relevance filter.
 - `Dron Alert` is **not connected** in this build: the exact official product/channel/API endpoint could not be verified from the supplied information. Do not treat it as a live source yet.
 - The name `Західний` is ambiguous; add its verified public handle to `TELEGRAM_CHANNELS` in Railway once confirmed. The `OFFICIAL_FEEDS` variable is reserved and RSS fetching is not implemented.
-- This package has syntax checks only; it has not been deployed or tested against your Railway secrets/Telegram group.
+- This package has syntax checks only; it has not been deployed or tested against your Railway variables/Telegram group. Telegram public previews can be delayed, restricted, or unavailable, so this is not a guaranteed real-time emergency-warning system.
+
+
+Обов’язкові публічні Telegram-джерела: `@zahidnimonitoring` (Західний Моніторинг) і `@totallzrada` (Тотальна Зрада). Бот читає доступний веб-прев’ю публічних каналів; це неофіційні джерела й вони не замінюють офіційне сповіщення про повітряну тривогу.
