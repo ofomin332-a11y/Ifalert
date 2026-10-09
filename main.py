@@ -12,7 +12,7 @@ BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 API_TOKEN = os.getenv('ALERTS_API_TOKEN', '').strip()
 POLL_SECONDS = max(10, int(os.getenv('POLL_SECONDS', '10')))
-CHANNEL_POLL_SECONDS = max(30, int(os.getenv('CHANNEL_POLL_SECONDS', '60')))
+CHANNEL_POLL_SECONDS = max(10, int(os.getenv('CHANNEL_POLL_SECONDS', '15')))
 API_URL = 'https://api.alerts.in.ua/v1/alerts/active.json'
 IF_UID = '13'
 
@@ -26,6 +26,7 @@ DEFAULT_CHANNELS = [
     'totallzrada',        # Тотальна Зрада (неофіційний агрегатор)
     'ifalarm',            # ТРИВОГА ІФ (локальний канал тривог)
     'air_alert_ua',       # офіційний загальноукраїнський канал тривог
+    'truexafrankivsk',    # TrueX Івано-Франківськ
 ]
 CHANNELS = list(dict.fromkeys(
     x.strip().lstrip('@').strip('/')
@@ -202,63 +203,68 @@ def should_forward(handle, body):
     return local and threat
 
 
+async def poll_one_channel(session, bot, handle, seen):
+    """Poll one public Telegram channel independently so sources run concurrently."""
+    result = {
+        'checked': 0, 'failed': 0, 'posts_found': 0, 'new': 0,
+        'forwarded': 0, 'filtered': 0, 'baselines': 0,
+    }
+    url = f'https://t.me/s/{handle}'
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+            r.raise_for_status()
+            page = await r.text()
+        posts = extract_posts(page, handle)
+        result['checked'] = 1
+        result['posts_found'] = len(posts)
+
+        # First successful read establishes baseline to avoid dumping old posts.
+        if handle not in seen:
+            seen[handle] = {p[0] for p in posts}
+            result['baselines'] = 1
+            log.info('Channel baseline established: @%s (%d recent posts)', handle, len(posts))
+            return result
+
+        known = seen[handle]
+        new_posts = [p for p in posts if p[0] not in known]
+        result['new'] = len(new_posts)
+        for post_id, when, body, link in new_posts:
+            known.add(post_id)
+            if should_forward(handle, body):
+                message = (f'📡 Джерело: <b>@{html.escape(handle)}</b>\n\n'
+                           f'{html.escape(body[:2600])}')
+                try:
+                    await send(bot, message)
+                    result['forwarded'] += 1
+                    log.info('Telegram forward OK: @%s post=%s', handle, post_id)
+                except TelegramError:
+                    log.exception('Telegram forward failed for @%s post=%s', handle, post_id)
+            else:
+                result['filtered'] += 1
+                log.info('New post filtered: @%s post=%s (not matching local threat rules)', handle, post_id)
+
+        # Limit memory; channel page only exposes recent posts.
+        if len(known) > 500:
+            seen[handle] = set(list(known)[-250:])
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        result['failed'] = 1
+        log.exception('Public Telegram source poll failed: @%s', handle)
+    return result
+
+
 async def poll_channels(session, bot, seen):
-    checked = 0
-    failed = 0
-    posts_found = 0
-    new_count = 0
-    forwarded = 0
-    filtered = 0
-    baseline_count = 0
-
-    for handle in CHANNELS:
-        url = f'https://t.me/s/{handle}'
-        try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                r.raise_for_status()
-                page = await r.text()
-            posts = extract_posts(page, handle)
-            checked += 1
-            posts_found += len(posts)
-
-            # First successful read establishes baseline to avoid dumping old posts.
-            if handle not in seen:
-                seen[handle] = {p[0] for p in posts}
-                baseline_count += 1
-                log.info('Channel baseline established: @%s (%d recent posts)', handle, len(posts))
-                continue
-
-            known = seen[handle]
-            new_posts = [p for p in posts if p[0] not in known]
-            new_count += len(new_posts)
-            for post_id, when, body, link in new_posts:
-                known.add(post_id)
-                if should_forward(handle, body):
-                    message = (f'📣 <b>НОВА ПУБЛІКАЦІЯ</b>\n'
-                               f'📡 Джерело: <b>@{html.escape(handle)}</b>\n\n'
-                               f'{html.escape(body[:2600])}')
-                    try:
-                        await send(bot, message)
-                        forwarded += 1
-                        log.info('Telegram forward OK: @%s post=%s', handle, post_id)
-                    except TelegramError:
-                        log.exception('Telegram forward failed for @%s post=%s', handle, post_id)
-                else:
-                    filtered += 1
-                    log.info('New post filtered: @%s post=%s (not matching local threat rules)', handle, post_id)
-
-            # Limit memory; channel page only exposes recent posts.
-            if len(known) > 500:
-                seen[handle] = set(list(known)[-250:])
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            failed += 1
-            log.exception('Public Telegram source poll failed: @%s', handle)
-
+    # Query every source concurrently; a slow channel won't delay the others.
+    results = await asyncio.gather(*(
+        poll_one_channel(session, bot, handle, seen) for handle in CHANNELS
+    ))
+    totals = {key: sum(item[key] for item in results) for key in results[0]} if results else {}
     log.info(
-        'Channel poll complete: checked=%d/%d failed=%d posts_on_pages=%d new=%d forwarded=%d filtered=%d baselines=%d',
-        checked, len(CHANNELS), failed, posts_found, new_count, forwarded, filtered, baseline_count
+        'Channel poll complete: checked=%d/%d failed=%d posts_on_pages=%d new=%d forwarded=%d filtered=%d baselines=%d interval=%ss',
+        totals.get('checked', 0), len(CHANNELS), totals.get('failed', 0),
+        totals.get('posts_found', 0), totals.get('new', 0), totals.get('forwarded', 0),
+        totals.get('filtered', 0), totals.get('baselines', 0), CHANNEL_POLL_SECONDS
     )
 
 async def main():

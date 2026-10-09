@@ -2,7 +2,7 @@
 
 ## Що підключено
 - `alerts.in.ua` API для активних повітряних тривог і змін статусу по Івано-Франківській області (UID 13).
-- Публічні Telegram-перегляди: `@martsinkiv_online`, `@mrada_if_ua`, `@onyshchuksvitlana`, `@totallzrada`, `@ifalarm`, `@air_alert_ua`.
+- Публічні Telegram-перегляди: `@martsinkiv_online`, `@mrada_if_ua`, `@onyshchuksvitlana`, `@zahidnimonitoring`, `@totallzrada`, `@ifalarm`, `@air_alert_ua`, `@truexafrankivsk`.
 - Пересилання нових дописів із посиланням на оригінал, автором-джерелом і часом публікації, якщо публічна сторінка Telegram доступна.
 
 ## Railway Variables
@@ -13,7 +13,7 @@ Required:
 
 Optional:
 - `POLL_SECONDS=10` — частота перевірки API тривог (мінімум 10 сек).
-- `CHANNEL_POLL_SECONDS=60` — інтервал перевірки Telegram-каналів (мінімум 30 сек).
+- `CHANNEL_POLL_SECONDS=15` — інтервал перевірки Telegram-каналів (мінімум 10 сек). Усі канали опитуються паралельно.
 - `TELEGRAM_CHANNELS=handle1,handle2` — додаткові публічні Telegram-канали без @.
 - `OFFICIAL_FEEDS=url1,url2` — зарезервовано для додаткових RSS/сайтів; у цій версії автоматичний парсер RSS ще не реалізований.
 
