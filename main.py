@@ -12,7 +12,7 @@ BOT_TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 API_TOKEN = os.getenv('ALERTS_API_TOKEN', '').strip()
 POLL_SECONDS = max(10, int(os.getenv('POLL_SECONDS', '10')))
-CHANNEL_POLL_SECONDS = max(10, int(os.getenv('CHANNEL_POLL_SECONDS', '15')))
+CHANNEL_POLL_SECONDS = max(10, int(os.getenv('CHANNEL_POLL_SECONDS', '10')))
 API_URL = 'https://api.alerts.in.ua/v1/alerts/active.json'
 IF_UID = '13'
 
@@ -136,69 +136,31 @@ def extract_posts(page, handle):
     return list(unique.values())[-20:]
 
 def should_forward(handle, body):
-    """Forward local threat news, including western-route warnings that may affect the oblast.
-
-    Telegram aggregators are unofficial. Keep the source label and original link on every post.
-    """
+    """Forward only threat-related posts explicitly mentioning Ivano-Frankivsk region."""
     t = body.casefold()
     local_terms = (
-        'івано-франків', 'івано франків', 'прикарпат', 'франківськ',
+        'івано-франків', 'івано франків', 'іванофранків', 'прикарпат', 'франківськ',
         'калуш', 'коломия', 'надвірна', 'долина', 'косів', 'верховина',
         'бурштин', 'галич', 'тлумач', 'рогатин', 'богородчан', 'яремче',
-        'івано-франківська область', 'івано-франківський район'
-    )
-    western_terms = (
-        'захід україни', 'західні області', 'західних област', 'західна україна',
-        'львівщин', 'тернопільщин', 'закарпат', 'чернівеччин', 'волин', 'рівненщин',
-        'карпат', 'прикарпат', 'хмельниччин'
+        'івано-франківська область', 'івано-франківський район', 'івано-франківщин',
+        'івано-франківську область', 'на прикарпатті'
     )
     other_region = (
         'київщина', 'харківщина', 'одещина', 'сумщина', 'дніпропетровщина',
         'полтавщина', 'чернігівщина', 'херсонщина', 'запоріжжя', 'донеччина',
-        'луганщина', 'вінниччина'
+        'луганщина', 'вінниччина', 'львівщин', 'тернопільщин', 'закарпат',
+        'чернівеччин', 'волин', 'рівненщин', 'хмельниччин'
     )
     threat_keywords = (
         'тривог', 'повітрян', 'ракета', 'баліст', 'шахед', 'дрон', 'бпла',
         'вибух', 'обстріл', 'відбій', 'укрит', 'ппо', 'загроз', 'зліт',
         'пуск', 'курс на', 'курсом на', 'рухається', 'рухаються', 'летить',
-        'летять', 'напрям', 'ціль', 'цілі', 'повітряний простір'
+        'летять', 'напрям', 'ціль', 'цілі', 'повітряний простір', 'вибухи'
     )
     local = any(term in t for term in local_terms)
-    western = any(term in t for term in western_terms)
     threat = any(term in t for term in threat_keywords)
-    route_context = any(term in t for term in (
-        'курс', 'курсом', 'напрям', 'рухається', 'рухаються', 'летить', 'летять',
-        'залітає', 'залітають', 'повз', 'через область', 'через захід'
-    ))
-
-    # Local official sources can send civic and threat updates, except posts clearly
-    # about a different region with no local reference.
-    official_local = {'martsinkiv_online', 'mrada_if_ua', 'onyshchuksvitlana'}
-    if handle in official_local:
-        if any(term in t for term in other_region) and not local:
-            return False
-        return True
-
-    # Mandatory aggregators: include local threats and threat/flight-route updates
-    # about western Ukraine that could be relevant to Ivano-Frankivsk. Other-region-only
-    # posts without western/local/route context are excluded.
-    aggregators = {'zahidnimonitoring', 'totallzrada'}
-    if handle in aggregators:
-        if not threat:
-            return False
-        if local:
-            return True
-        if western:
-            return True
-        if route_context and any(term in t for term in (
-            'захід', 'західн', 'львів', 'терноп', 'закарпат', 'чернів',
-            'волин', 'рівнен', 'карпат', 'хмельниц'
-        )):
-            return True
-        return False
-
-    # Other sources: require explicit local geography and threat-related content.
-    if any(term in t for term in other_region) and not local:
+    # Avoid forwarding posts clearly about another region even if they mention a local term incidentally.
+    if any(term in t for term in other_region) and not any(term in t for term in local_terms):
         return False
     return local and threat
 
@@ -211,7 +173,7 @@ async def poll_one_channel(session, bot, handle, seen):
     }
     url = f'https://t.me/s/{handle}'
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
             r.raise_for_status()
             page = await r.text()
         posts = extract_posts(page, handle)
@@ -267,16 +229,31 @@ async def poll_channels(session, bot, seen):
         totals.get('filtered', 0), totals.get('baselines', 0), CHANNEL_POLL_SECONDS
     )
 
+async def channel_monitor(session, bot, seen_channels):
+    """Poll public channels on a 10-second cadence, independently of the alert API loop."""
+    while True:
+        started = asyncio.get_running_loop().time()
+        try:
+            await poll_channels(session, bot, seen_channels)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception('Channel monitor cycle failed')
+        elapsed = asyncio.get_running_loop().time() - started
+        await asyncio.sleep(max(0.0, CHANNEL_POLL_SECONDS - elapsed))
+
+
 async def main():
     bot = Bot(token=BOT_TOKEN)
     if not API_TOKEN:
         log.warning('ALERTS_API_TOKEN is not set: Alerts.in.ua API disabled; using public Telegram sources only. Coverage is not guaranteed.')
+    log.info('Monitor started: channels=%d channel_interval=%ss local_threat_filter=enabled', len(CHANNELS), CHANNEL_POLL_SECONDS)
     previous = None
     fingerprints = {}
     etag = None
     seen_channels = {}
-    last_channel_poll = 0.0
     async with aiohttp.ClientSession(headers={'User-Agent':'Mozilla/5.0 IF-Alert-Monitor/3.0'}) as session:
+        channel_task = asyncio.create_task(channel_monitor(session, bot, seen_channels))
         while True:
             try:
                 if API_TOKEN:
@@ -306,10 +283,6 @@ async def main():
             except Exception:
                 log.exception('Alert API polling failed; preserving previous known state')
 
-            now = asyncio.get_running_loop().time()
-            if now - last_channel_poll >= CHANNEL_POLL_SECONDS:
-                await poll_channels(session, bot, seen_channels)
-                last_channel_poll = now
             await asyncio.sleep(POLL_SECONDS)
 
 if __name__ == '__main__':
