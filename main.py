@@ -135,9 +135,10 @@ def extract_posts(page, handle):
     return list(unique.values())[-20:]
 
 def should_forward(handle, body):
-    # Locality filter for third-party aggregators. Official Ivano-Frankivsk
-    # sources are trusted as geographically local, but still filter posts that
-    # explicitly focus on a different oblast.
+    """Forward local threat news, including western-route warnings that may affect the oblast.
+
+    Telegram aggregators are unofficial. Keep the source label and original link on every post.
+    """
     t = body.casefold()
     local_terms = (
         'івано-франків', 'івано франків', 'прикарпат', 'франківськ',
@@ -145,25 +146,60 @@ def should_forward(handle, body):
         'бурштин', 'галич', 'тлумач', 'рогатин', 'богородчан', 'яремче',
         'івано-франківська область', 'івано-франківський район'
     )
+    western_terms = (
+        'захід україни', 'західні області', 'західних област', 'західна україна',
+        'львівщин', 'тернопільщин', 'закарпат', 'чернівеччин', 'волин', 'рівненщин',
+        'карпат', 'прикарпат', 'хмельниччин'
+    )
     other_region = (
-        'київщина', 'львівщина', 'волинь', 'закарпаття', 'тернопільщина',
-        'чернівеччина', 'рівненщина', 'харківщина', 'одещина', 'сумщина',
-        'дніпропетровщина', 'полтавщина', 'чернігівщина', 'херсонщина',
-        'запоріжжя', 'донеччина', 'луганщина', 'хмельниччина', 'вінниччина'
+        'київщина', 'харківщина', 'одещина', 'сумщина', 'дніпропетровщина',
+        'полтавщина', 'чернігівщина', 'херсонщина', 'запоріжжя', 'донеччина',
+        'луганщина', 'вінниччина'
     )
+    threat_keywords = (
+        'тривог', 'повітрян', 'ракета', 'баліст', 'шахед', 'дрон', 'бпла',
+        'вибух', 'обстріл', 'відбій', 'укрит', 'ппо', 'загроз', 'зліт',
+        'пуск', 'курс на', 'курсом на', 'рухається', 'рухаються', 'летить',
+        'летять', 'напрям', 'ціль', 'цілі', 'повітряний простір'
+    )
+    local = any(term in t for term in local_terms)
+    western = any(term in t for term in western_terms)
+    threat = any(term in t for term in threat_keywords)
+    route_context = any(term in t for term in (
+        'курс', 'курсом', 'напрям', 'рухається', 'рухаються', 'летить', 'летять',
+        'залітає', 'залітають', 'повз', 'через область', 'через захід'
+    ))
+
+    # Local official sources can send civic and threat updates, except posts clearly
+    # about a different region with no local reference.
     official_local = {'martsinkiv_online', 'mrada_if_ua', 'onyshchuksvitlana'}
-    # Do not forward an obviously other-region-only post from any source.
-    if any(term in t for term in other_region) and not any(term in t for term in local_terms):
-        return False
     if handle in official_local:
+        if any(term in t for term in other_region) and not local:
+            return False
         return True
-    keywords = (
-        'тривог', 'повітрян', 'ракета', 'шахед', 'дрон', 'бпла',
-        'вибух', 'обстріл', 'відбій', 'укрит', 'марцінків',
-        'міська рада', 'обласна рада', 'ова', 'енерг', 'відключ',
-        'ппо', 'загроз'
-    )
-    return any(term in t for term in local_terms) and any(k in t for k in keywords)
+
+    # Mandatory aggregators: include local threats and threat/flight-route updates
+    # about western Ukraine that could be relevant to Ivano-Frankivsk. Other-region-only
+    # posts without western/local/route context are excluded.
+    aggregators = {'zahidnimonitoring', 'totallzrada'}
+    if handle in aggregators:
+        if not threat:
+            return False
+        if local:
+            return True
+        if western:
+            return True
+        if route_context and any(term in t for term in (
+            'захід', 'західн', 'львів', 'терноп', 'закарпат', 'чернів',
+            'волин', 'рівнен', 'карпат', 'хмельниц'
+        )):
+            return True
+        return False
+
+    # Other sources: require explicit local geography and threat-related content.
+    if any(term in t for term in other_region) and not local:
+        return False
+    return local and threat
 
 
 async def poll_channels(session, bot, seen):

@@ -32,9 +32,9 @@ Railway використовує `Procfile` (`python main.py`). Перевірт
 
 ## Source coverage status
 - Alerts.in.ua API is optional and filtered to oblast UID 13 when `ALERTS_API_TOKEN` is configured. Without it, no direct API alert-state feed is available.
-- Public Telegram preview polling is best-effort for the configured handles, including `@ifalarm` and `@air_alert_ua`; the bot only forwards posts that pass its Ivano-Frankivsk relevance filter.
+- Public Telegram preview polling is best-effort for the configured handles, including `@ifalarm` and `@air_alert_ua`; the bot filters for Ivano-Frankivsk/oblast relevance; the two mandatory aggregators also pass relevant western-Ukraine threat and flight-route posts. Every forwarded post should be treated as source-reported, not independently verified.
 - `Dron Alert` is **not connected** in this build: the exact official product/channel/API endpoint could not be verified from the supplied information. Do not treat it as a live source yet.
-- The name `Західний` is ambiguous; add its verified public handle to `TELEGRAM_CHANNELS` in Railway once confirmed. The `OFFICIAL_FEEDS` variable is reserved and RSS fetching is not implemented.
+- The mandatory aggregator handles `@zahidnimonitoring` and `@totallzrada` are configured. Their posts are unofficial; the filter includes local threat posts and threat/flight-route updates mentioning western Ukraine, but it cannot determine actual trajectories independently. `Dron Alert` is not connected because no verified public feed/API endpoint is configured.
 - This package has syntax checks only; it has not been deployed or tested against your Railway variables/Telegram group. Telegram public previews can be delayed, restricted, or unavailable, so this is not a guaranteed real-time emergency-warning system.
 
 
