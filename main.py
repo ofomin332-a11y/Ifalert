@@ -203,6 +203,14 @@ def should_forward(handle, body):
 
 
 async def poll_channels(session, bot, seen):
+    checked = 0
+    failed = 0
+    posts_found = 0
+    new_count = 0
+    forwarded = 0
+    filtered = 0
+    baseline_count = 0
+
     for handle in CHANNELS:
         url = f'https://t.me/s/{handle}'
         try:
@@ -210,30 +218,49 @@ async def poll_channels(session, bot, seen):
                 r.raise_for_status()
                 page = await r.text()
             posts = extract_posts(page, handle)
+            checked += 1
+            posts_found += len(posts)
+
             # First successful read establishes baseline to avoid dumping old posts.
             if handle not in seen:
                 seen[handle] = {p[0] for p in posts}
+                baseline_count += 1
                 log.info('Channel baseline established: @%s (%d recent posts)', handle, len(posts))
                 continue
+
             known = seen[handle]
             new_posts = [p for p in posts if p[0] not in known]
+            new_count += len(new_posts)
             for post_id, when, body, link in new_posts:
                 known.add(post_id)
                 if should_forward(handle, body):
-                    text = (f'📣 <b>НОВА ПУБЛІКАЦІЯ</b>\n'
-                            f'📡 Джерело: <b>@{html.escape(handle)}</b>\n'
-                            f'🕒 Час публікації: {html.escape(when)}\n\n'
-                            f'{html.escape(body[:2600])}\n\n🔗 <a href="{link}">Відкрити оригінал</a>')
+                    message = (f'📣 <b>НОВА ПУБЛІКАЦІЯ</b>\\n'
+                               f'📡 Джерело: <b>@{html.escape(handle)}</b>\\n'
+                               f'🕒 Час публікації: {html.escape(when)}\\n\\n'
+                               f'{html.escape(body[:2600])}\\n\\n🔗 <a href="{link}">Відкрити оригінал</a>')
                     try:
-                        await send(bot, text)
+                        await send(bot, message)
+                        forwarded += 1
+                        log.info('Telegram forward OK: @%s post=%s', handle, post_id)
                     except TelegramError:
-                        log.exception('Telegram forward failed for @%s', handle)
+                        log.exception('Telegram forward failed for @%s post=%s', handle, post_id)
+                else:
+                    filtered += 1
+                    log.info('New post filtered: @%s post=%s (not matching local threat rules)', handle, post_id)
+
             # Limit memory; channel page only exposes recent posts.
-            if len(known) > 500: seen[handle] = set(list(known)[-250:])
+            if len(known) > 500:
+                seen[handle] = set(list(known)[-250:])
         except asyncio.CancelledError:
             raise
         except Exception:
+            failed += 1
             log.exception('Public Telegram source poll failed: @%s', handle)
+
+    log.info(
+        'Channel poll complete: checked=%d/%d failed=%d posts_on_pages=%d new=%d forwarded=%d filtered=%d baselines=%d',
+        checked, len(CHANNELS), failed, posts_found, new_count, forwarded, filtered, baseline_count
+    )
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
