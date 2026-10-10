@@ -137,7 +137,9 @@ def extract_posts(page, handle):
     return list(unique.values())[-20:]
 
 def should_forward(handle, body):
-    """Forward only threat-related posts explicitly mentioning Ivano-Frankivsk region."""
+    """Forward every new post from blacklist2477; locally filter other channels."""
+    if handle.casefold().lstrip('@') == 'blacklist2477':
+        return True
     t = body.casefold()
     local_terms = (
         'івано-франків', 'івано франків', 'іванофранків', 'прикарпат', 'франківськ',
@@ -248,7 +250,7 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     if not API_TOKEN:
         log.warning('ALERTS_API_TOKEN is not set: Alerts.in.ua API disabled; using public Telegram sources only. Coverage is not guaranteed.')
-    log.info('Monitor started: channels=%d channel_interval=%ss local_threat_filter=enabled', len(CHANNELS), CHANNEL_POLL_SECONDS)
+    log.info('Monitor started: channels=%d channel_interval=%ss local_threat_filter=enabled blacklist2477=forward_all_new_posts', len(CHANNELS), CHANNEL_POLL_SECONDS)
     previous = None
     fingerprints = {}
     etag = None
