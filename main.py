@@ -13,6 +13,7 @@ CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
 API_TOKEN = os.getenv('ALERTS_API_TOKEN', '').strip()
 POLL_SECONDS = max(10, int(os.getenv('POLL_SECONDS', '10')))
 CHANNEL_POLL_SECONDS = max(10, int(os.getenv('CHANNEL_POLL_SECONDS', '10')))
+BLACKLIST_POLL_SECONDS = max(1, int(os.getenv('BLACKLIST_POLL_SECONDS', '5')))
 API_URL = 'https://api.alerts.in.ua/v1/alerts/active.json'
 IF_UID = '13'
 
@@ -229,10 +230,11 @@ async def poll_one_channel(session, bot, handle, seen):
     return result
 
 
-async def poll_channels(session, bot, seen):
-    # Query every source concurrently; a slow channel won't delay the others.
+async def poll_channels(session, bot, seen, handles=None):
+    # Query selected sources concurrently; a slow channel won't delay the others.
+    selected = CHANNELS if handles is None else handles
     results = await asyncio.gather(*(
-        poll_one_channel(session, bot, handle, seen) for handle in CHANNELS
+        poll_one_channel(session, bot, handle, seen) for handle in selected
     ))
     totals = {key: sum(item[key] for item in results) for key in results[0]} if results else {}
     log.info(
@@ -242,31 +244,41 @@ async def poll_channels(session, bot, seen):
         totals.get('filtered', 0), totals.get('baselines', 0), CHANNEL_POLL_SECONDS
     )
 
-async def channel_monitor(session, bot, seen_channels):
-    """Poll public channels on a 10-second cadence, independently of the alert API loop."""
+async def channel_monitor(session, bot, seen_channels, handles, interval, label):
+    """Poll a source group on its own cadence, independently of other loops."""
     while True:
         started = asyncio.get_running_loop().time()
         try:
-            await poll_channels(session, bot, seen_channels)
+            await poll_channels(session, bot, seen_channels, handles)
         except asyncio.CancelledError:
             raise
         except Exception:
-            log.exception('Channel monitor cycle failed')
+            log.exception('Channel monitor cycle failed: %s', label)
         elapsed = asyncio.get_running_loop().time() - started
-        await asyncio.sleep(max(0.0, CHANNEL_POLL_SECONDS - elapsed))
+        await asyncio.sleep(max(0.0, interval - elapsed))
 
 
 async def main():
     bot = Bot(token=BOT_TOKEN)
     if not API_TOKEN:
         log.warning('ALERTS_API_TOKEN is not set: Alerts.in.ua API disabled; using public Telegram sources only. Coverage is not guaranteed.')
-    log.info('Monitor started: channels=%d channel_interval=%ss local_threat_filter=enabled blacklist2477=forward_all_new_posts', len(CHANNELS), CHANNEL_POLL_SECONDS)
+    log.info('Monitor started: channels=%d channel_interval=%ss blacklist2477_interval=%ss local_threat_filter=enabled blacklist2477=forward_all_new_posts', len(CHANNELS), CHANNEL_POLL_SECONDS, BLACKLIST_POLL_SECONDS)
     previous = None
     fingerprints = {}
     etag = None
     seen_channels = {}
     async with aiohttp.ClientSession(headers={'User-Agent':'Mozilla/5.0 IF-Alert-Monitor/3.0'}) as session:
-        channel_task = asyncio.create_task(channel_monitor(session, bot, seen_channels))
+        blacklist_handles = [h for h in CHANNELS if h.casefold() == 'blacklist2477']
+        other_handles = [h for h in CHANNELS if h.casefold() != 'blacklist2477']
+        channel_tasks = [
+            asyncio.create_task(channel_monitor(session, bot, seen_channels, other_handles,
+                                                CHANNEL_POLL_SECONDS, 'other channels'))
+        ]
+        if blacklist_handles:
+            channel_tasks.append(asyncio.create_task(
+                channel_monitor(session, bot, seen_channels, blacklist_handles,
+                                BLACKLIST_POLL_SECONDS, '@blacklist2477')
+            ))
         while True:
             try:
                 if API_TOKEN:
