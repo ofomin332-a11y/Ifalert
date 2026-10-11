@@ -126,8 +126,13 @@ def extract_posts(page, handle):
             continue
         for br in body_node.select('br'):
             br.replace_with('\n')
-        body = body_node.get_text('', strip=True)
-        body = html.unescape(body).strip()
+        # Keep spaces between inline HTML nodes; using an empty separator merges
+        # words when Telegram splits formatting across <b>/<span> elements.
+        body = body_node.get_text(' ', strip=True)
+        body = html.unescape(body).replace('\xa0', ' ')
+        body = re.sub(r'[ \t]*\n[ \t]*', '\n', body)
+        body = re.sub(r'[ \t]+', ' ', body)
+        body = re.sub(r'\n{3,}', '\n\n', body).strip()
         if body:
             posts.append((post_id, when, body, f'https://t.me/{post_id}'))
     # Telegram page displays newest first; preserve only unique recent posts.
