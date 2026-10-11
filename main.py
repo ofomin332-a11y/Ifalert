@@ -196,8 +196,13 @@ async def poll_one_channel(session, bot, handle, seen):
         for post_id, when, body, link in new_posts:
             known.add(post_id)
             if should_forward(handle, body):
+                # Remove channel promotion footer; keep the news text and source attribution.
+                clean_body = re.sub(
+                    r'(?is)\s*✅\s*Підписка\s*📩\s*Надіслати\s*новину\s*$',
+                    '', body
+                ).strip()
                 message = (f'📡 Джерело: <b>@{html.escape(handle)}</b>\n\n'
-                           f'{html.escape(body[:2600])}')
+                           f'{html.escape(clean_body[:2600])}')
                 try:
                     await send(bot, message)
                     result['forwarded'] += 1
